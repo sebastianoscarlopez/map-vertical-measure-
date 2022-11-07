@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Add a GeoJSON line</title>
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+    <link
+      href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      // TUCUMAN 316 entre 25 de  mayo y reconquista
+      const building = {
+        type: "FeatureCollection",
+        features: [
+          {
+            geometry: {
+              type: "MultiPolygon",
+              coordinates: [
+                [
+                  [
+                    [-58.37155535808879, -34.6008124483011],
+                    [-58.371500088050894, -34.60107470599249],
+                    [-58.37148446772678, -34.60114882669109],
+                    [-58.37147230311668, -34.60120654555578],
+                    [-58.371463144879485, -34.60124999698269],
+                    [-58.37144829482399, -34.60132044959489],
+                    [-58.37144426135879, -34.601339566722395],
+                    [-58.371520222685184, -34.60134747310028],
+                    [-58.37153802080309, -34.601349323396086],
+                    [-58.371649023165496, -34.6008202593708],
+                    [-58.37155535808879, -34.6008124483011],
+                  ],
+                ],
+              ],
+            },
+            type: "Feature",
+            properties: {
+              tipo: "parcela",
+              codigo: "001-046-002",
+              fuente: "",
+              fecha_actualizacion: "",
+              altura: 30,
+            },
+          },
+        ],
+      };
+
+      var map = (window.map = new maplibregl.Map({
+        container: "map",
+        zoom: 18,
+        center: [-58.37155535808879, -34.6008124483011],
+        style:
+          "https://api.maptiler.com/maps/streets/style.json?key=get_your_own_OpIi9ZULNHzrESv6T2vL",
+        antialias: true, // create the gl context with MSAA antialiasing, so custom layers are antialiased
+      }));
+
+      // create a custom style layer to implement the WebGL content
+      var highlightLayer = {
+        id: "highlight",
+        type: "custom",
+
+        // method called when the layer is added to the map
+        // https://maplibre.org/maplibre-gl-js-docs/api/properties/#styleimageinterface#onadd
+        onAdd: function (map, gl) {
+          // create GLSL source for vertex shader
+          var vertexSource =
+            "" +
+            "uniform mat4 u_matrix;" +
+            "attribute vec3 a_pos;" +
+            "void main() {" +
+            "    gl_Position = u_matrix * vec4(a_pos, 1.0);" +
+            "}";
+
+          // create GLSL source for fragment shader
+          var fragmentSource =
+            "" +
+            "void main() {" +
+            "    gl_FragColor = vec4(1.0, 0.0, 0.0, 0.5);" +
+            "}";
+
+          // create a vertex shader
+          var vertexShader = gl.createShader(gl.VERTEX_SHADER);
+          gl.shaderSource(vertexShader, vertexSource);
+          gl.compileShader(vertexShader);
+
+          // create a fragment shader
+          var fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+          gl.shaderSource(fragmentShader, fragmentSource);
+          gl.compileShader(fragmentShader);
+
+          // link the two shaders into a WebGL program
+          this.program = gl.createProgram();
+          gl.attachShader(this.program, vertexShader);
+          gl.attachShader(this.program, fragmentShader);
+          gl.linkProgram(this.program);
+
+          this.aPos = gl.getAttribLocation(this.program, "a_pos");
+
+          // create and initialize a WebGLBuffer to store vertex and color data
+          this.buffer = gl.createBuffer();
+
+          // define vertices of the triangle to be rendered in the custom style layer
+          this.helsinki = {
+            lng: -58.37155535808879,
+            lat: -34.6008124483011
+          };
+
+
+          this.berlin = {
+            lng: -58.37155535808879,
+            lat: -34.60107470599249
+          };
+          this.kyiv ={
+            lng: -58.37148446772678,
+            lat: -34.60114882669109
+          };
+
+          const { x: x0, y: y0, z: z0 } = maplibregl.MercatorCoordinate.fromLngLat(this.helsinki, 0);
+          const { x: x1, y: y1, z: z1 } = maplibregl.MercatorCoordinate.fromLngLat(this.berlin, 0);
+          const { x: x2, y: y2, z: z2 } = maplibregl.MercatorCoordinate.fromLngLat(this.kyiv, 0);
+          const updatedData = [
+            x0, y0, z0,
+            x1, y1, z1,
+            x2, y2, z2
+          ];
+
+          console.log(updatedData, this.helsinki, maplibregl.MercatorCoordinate.fromLngLat(this.helsinki, 0))
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+
+          gl.bufferData(
+            gl.ARRAY_BUFFER,
+            new Float32Array(updatedData),
+            gl.STATIC_DRAW
+          );
+
+          map.on(
+            "click",
+            function (e) {
+              this.helsinki = e.lngLat;
+            }.bind(this)
+          );
+        },
+
+        // method fired on each animation frame
+        // https://maplibre.org/maplibre-gl-js-docs/api/map/#map.event:render
+        render: function (gl, matrix) {
+          gl.useProgram(this.program);
+          gl.uniformMatrix4fv(
+            gl.getUniformLocation(this.program, "u_matrix"),
+            false,
+            matrix
+          );
+
+
+          const { x: x0, y: y0, z: z0 } = maplibregl.MercatorCoordinate.fromLngLat(this.helsinki, 0);
+          const { x: x1, y: y1, z: z1 } = maplibregl.MercatorCoordinate.fromLngLat(this.berlin, 0);
+          const { x: x2, y: y2, z: z2 } = maplibregl.MercatorCoordinate.fromLngLat(this.kyiv, 0);
+          const updatedData = [
+            x0, y0, z0,
+            x1, y1, z1,
+            x2, y2, z2
+          ];
+
+          gl.bufferData(
+            gl.ARRAY_BUFFER,
+            new Float32Array(updatedData),
+            gl.STATIC_DRAW
+          );
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+          gl.enableVertexAttribArray(this.aPos);
+          gl.vertexAttribPointer(this.aPos, 3, gl.FLOAT, false, 0, 0);
+          // gl.enable(gl.BLEND);
+          // gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 3);
+        },
+      };
+
+      // add the custom style layer to the map
+      map.on("load", function () {
+        map.addLayer(highlightLayer, "building");
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Add a GeoJSON line</title>
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+    <link
+      href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+      }
+    </style>
+
+    <script src="https://unpkg.com/three@0.106.2/build/three.min.js"></script>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      var map = (window.map = new maplibregl.Map({
+        container: "map",
+        style:
+          "https://api.maptiler.com/maps/basic/style.json?key=get_your_own_OpIi9ZULNHzrESv6T2vL",
+        zoom: 18,
+        center: [148.9819, -35.3981],
+        pitch: 60,
+        maxPitch: 85,
+        antialias: true, // create the gl context with MSAA antialiasing, so custom layers are antialiased
+      }));
+
+      var THREE = window.THREE;
+
+      var modelOrigin = null
+
+      const pointMeassures = []
+
+      // configuration of the custom layer for a 3D model per the CustomLayerInterface
+      var customLayer = {
+        id: "3d-model",
+        type: "custom",
+        renderingMode: "3d",
+        onAdd: function (map, gl) {
+          this.camera = new THREE.Camera();
+          this.scene = new THREE.Scene();
+
+          // create two three.js lights to illuminate the model
+          var directionalLight = new THREE.DirectionalLight(0xffffff);
+          directionalLight.position.set(0, -70, 100).normalize();
+          this.scene.add(directionalLight);
+
+          var directionalLight2 = new THREE.DirectionalLight(0xffffff);
+          directionalLight2.position.set(0, 70, 100).normalize();
+          this.scene.add(directionalLight2);
+
+          function makePoint({ color, position }) {
+            const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+
+            geometry.translate(...position);
+            const material = new THREE.MeshBasicMaterial({ color });
+            const mesh = new THREE.Mesh(geometry, material);
+
+            return {
+              geometry,
+              mesh
+            }
+          }
+
+          const cube = makePoint({ color: 0x00ffff, position: [0.0, 0.0, 0.0] });
+
+          const cube2 = makePoint({
+            color: 0x55dd55,
+            position: [0.0, 0.0, 0.0],
+          });
+
+          this.points = [cube, cube2]
+
+          const geometry = new THREE.BoxGeometry(0.05, 0.05, 0.1);
+          const material = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+          const mesh = new THREE.Mesh(geometry, material);
+          this.line = {
+            geometry,
+            mesh
+          }
+
+          this.map = map;
+
+          // use the MapLibre GL JS map canvas for three.js
+          this.renderer = new THREE.WebGLRenderer({
+            canvas: map.getCanvas(),
+            context: gl,
+            antialias: true,
+          });
+
+          this.renderer.autoClear = false;
+
+          map.on('click', function ({ lngLat, point}) {
+            if(pointMeassures.length === 0) {
+              modelOrigin = lngLat;
+              pointMeassures.push({
+                position: [0, 0, 0],
+                point: point
+              })
+              pointMeassures.push({
+                position: [0, 0, 0],
+                point: point
+              })
+              this.scene.add(this.points[0].mesh)
+              this.scene.add(this.points[1].mesh)
+              this.scene.add(this.line.mesh)
+              console.log(this.line)
+            
+            }
+          }.bind(this))
+
+
+          function updatePosition({ point }) {
+            if(pointMeassures.length > 1) {
+              // Based on https://docs.mapbox.com/help/glossary/zoom-level/
+              const diffPixels = pointMeassures[1].point.y - point.y
+              const zoom = Math.floor(map.getZoom()) + 1
+              const pixelsByMeter = new Array(zoom).fill(2).reduce((r, n) => r / n, 78271.484 )
+              const dist = diffPixels * pixelsByMeter ///* 10 / zoom
+              pointMeassures[1].position = [0, 0, dist]
+
+              document.querySelector('#info').innerHTML = `Altura: ${dist.toFixed(2)}m`
+            }
+          }
+
+          map.on('mousemove', function (e) {
+            requestAnimationFrame(()=> {
+              updatePosition(e)
+            })
+          }.bind(this))
+
+
+          // map.on('zoom', function (e) {
+          //   console.log(e)
+          // }.bind(this))
+        },
+
+        render: function (gl, matrix) {
+          // parameters to ensure the model is georeferenced correctly on the map
+          //var modelOrigin = [148.9819, -35.39847];
+          if(!modelOrigin) {
+            return;
+          }
+
+          pointMeassures.forEach(({ position }, idx) => {
+            this.points[idx].mesh.position.set(...position)  
+          });
+
+          if(pointMeassures.length > 1) {
+            this.line.mesh.position.set(pointMeassures[1].position[0], pointMeassures[1].position[1], pointMeassures[1].position[2] / 2)
+            this.line.mesh.scale.z = pointMeassures[1].position[2] * 10
+          }
+
+          var modelAltitude = 0;
+
+          var modelAsMercatorCoordinate =
+            maplibregl.MercatorCoordinate.fromLngLat(
+              modelOrigin,
+              modelAltitude
+            );
+
+          // transformation parameters to position, rotate and scale the 3D model onto the map
+          var modelTransform = {
+            translateX: modelAsMercatorCoordinate.x,
+            translateY: modelAsMercatorCoordinate.y,
+            translateZ: modelAsMercatorCoordinate.z,
+            /* Since our 3D model is in real world meters, a scale transform needs to be
+             * applied since the CustomLayerInterface expects units in MercatorCoordinates.
+             */
+            scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits(),
+          };
+
+          var m = new THREE.Matrix4().fromArray(matrix);
+          var l = new THREE.Matrix4()
+            .makeTranslation(
+              modelTransform.translateX,
+              modelTransform.translateY,
+              modelTransform.translateZ
+            )
+            .scale(
+              new THREE.Vector3(
+                modelTransform.scale,
+                -modelTransform.scale,
+                modelTransform.scale
+              )
+            );
+
+          this.camera.projectionMatrix = m.multiply(l);
+          this.renderer.state.reset();
+          this.renderer.render(this.scene, this.camera);
+          this.map.triggerRepaint();
+        },
+      };
+
+      map.on("style.load", function () {
+        map.addLayer(customLayer);
+      });
+    </script>
+    <div id="info" style="
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      z-index: 100;
+      display:block;
+    ">Altura: </div>
+  </body>
+</html>
